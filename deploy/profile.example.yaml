@@ -1,0 +1,34 @@
+# Example profile for the screener (fictional persona, sample data only).
+# Copy to ~/.config/job-copilot/profile.yaml (mode 600) and replace it with your own.
+# Keep it non-identifying: no name, contact details, employers, dates or schools. The full CV goes
+# in ~/.config/job-copilot/cv.md and is read only when drafting.
+summary: >
+  Mid-senior business systems engineer on the RevOps side: HubSpot and NetSuite administration,
+  iPaaS integrations (Workato, Zapier) that keep CRM and ERP data in sync, and the reporting that
+  Sales and Finance run the week on.
+strengths:
+  - HubSpot administration: objects, workflows, lead routing, permissions and data hygiene
+  - NetSuite integrations: customer, order and invoice sync with retries and reconciliation reports
+  - iPaaS recipes in Workato and Zapier, with error alerts and a runbook for each one
+  - Revenue reporting: pipeline and bookings dashboards that Sales and Finance agree on
+target_roles:
+  - Business Systems Engineer
+  - RevOps Systems Analyst / Engineer
+  - Integration Engineer (business applications)
+conditional:
+  - "Product Operations titles: a fit only if systems-heavy; unknown from a title alone, so borderline"
+lower_priority:
+  - Senior Business Systems Analyst (mostly requirements, little building)
+not_qualified_or_not_wanted:
+  - people management
+  - ML engineering or model training
+  - frontend or mobile development
+seniority: [mid-level individual contributor, senior individual contributor]
+location:
+  regions: [Jerusalem area, Remote]
+  work_mode: remote or hybrid
+deal_breakers:
+  - contract or temporary positions
+  - internships or student positions
+  - roles requiring relocation abroad
+languages: [English, Hebrew]

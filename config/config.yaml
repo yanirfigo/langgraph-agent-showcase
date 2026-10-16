@@ -1,0 +1,59 @@
+# Read by code only. Changing a threshold, model or limit requires the release gate to pass:
+#   uv run python evals/gate.py <pool.jsonl> <labels.json>
+# The key itself is in ~/.config/job-copilot/secrets.env. A workspace id (required for
+# org-scoped service keys) goes in the private ~/.config/job-copilot/config.local.yaml.
+langsmith:
+  api_url: https://api.smith.langchain.com     # US region
+  workspace_id: null
+  project: job-copilot
+
+models:
+  screener: claude-haiku-5-5
+  research: claude-sonnet-5-5
+  draft: claude-opus-5-5
+  fallback: claude-haiku-5-5
+
+thresholds:
+  digest_min: 55      # below: dropped
+  research_min: 75    # at or above: company research (if budget left)
+
+limits:
+  max_postings_per_run: 40
+  max_research_per_run: 3
+  graph_recursion_limit: 60
+  daily_model_calls: 400
+  screener_model_calls_per_run: 2
+  research_model_calls_per_run: 8
+  research_tool_calls_per_run: 6
+  research_searches_per_run: 4    # server-side web_search uses per research run
+  research_timeout_s: 300         # hard wall-clock limit per research run
+  max_digest_items: 8             # Telegram messages with buttons per run (best first)
+  fetch_timeout_s: 15
+  fetch_max_bytes: 300000
+
+# Job sources. The bundled fetchers live in src/job_copilot/ingest/sources.py and target the
+# Israeli job market (Ocean of Jobs with israel_only=1, and the TechMap Israel CSVs).
+# company_passes: companies whose postings are all pulled (same source, same market) and kept when
+# they match a target role or a wider similar-roles net (tagged "wide-net"). They run before the
+# general sources, so their tagging wins the dedupe. A list in config.local.yaml replaces this one.
+#   company_passes:
+#     - domain: example.com     # the company's domain as Ocean of Jobs knows it
+#       name: Example           # display name in the digest
+sources:
+  company_passes: []
+
+# fetch_page allows these domains (and subdomains), the posting's own host, and exact URLs that
+# web_search returned in the same run. Anything resolving to a private/tailnet IP is always refused.
+fetch_allowlist:
+  - linkedin.com
+  - comeet.com
+  - greenhouse.io
+  - lever.co
+  - myworkdayjobs.com
+  - smartrecruiters.com
+  - ashbyhq.com
+  - techmap.io
+  - wikipedia.org
+  - crunchbase.com
+
+timezone: Asia/Jerusalem

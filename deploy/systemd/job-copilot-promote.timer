@@ -1,0 +1,9 @@
+[Unit]
+Description=Job Copilot weekly feedback promotion (Sunday 07:30 Asia/Jerusalem)
+
+[Timer]
+OnCalendar=Sun *-*-* 07:30:00 Asia/Jerusalem
+Persistent=true
+
+[Install]
+WantedBy=timers.target

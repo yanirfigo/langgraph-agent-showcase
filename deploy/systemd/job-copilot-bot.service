@@ -1,0 +1,26 @@
+[Unit]
+Description=Job Copilot Telegram bot (resumes application threads on button presses)
+After=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/job-copilot
+ExecStart=%h/job-copilot/.venv/bin/python -m job_copilot.bot
+Restart=on-failure
+RestartSec=20
+
+# Hardening (user unit): read-only everywhere except the agent's own data, no privilege gain.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/job-copilot
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+MemoryMax=600M
+
+[Install]
+WantedBy=default.target

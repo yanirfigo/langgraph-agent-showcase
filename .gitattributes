@@ -1,0 +1,2 @@
+# Runs on Linux (the host): keep LF on every checkout.
+* text=auto eol=lf
