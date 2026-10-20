@@ -29,6 +29,11 @@ with fake models and a console Telegram.
 
 ## Architecture
 
+**[Interactive architecture map](https://yanirfigo.github.io/langgraph-agent-showcase/)**: click any
+component or routing edge to see what it does, how, and the exact code, linked to its lines on GitHub.
+It is rebuilt on every push from [docs/architecture/spec.yaml](docs/architecture/spec.yaml), and the
+build fails if a code reference goes stale.
+
 Two processes, two LangGraph graphs. Steps marked *plain Python* involve no model.
 
 ```mermaid

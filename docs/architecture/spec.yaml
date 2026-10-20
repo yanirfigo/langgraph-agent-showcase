@@ -1,0 +1,1571 @@
+# Interactive architecture map. Built into site/index.html by tools/build_architecture.py and published
+# to GitHub Pages by .github/workflows/pages.yml.
+#
+# nodes: one entry per component. refs name code by file + symbol (dotted Python qualname, e.g.
+#   build_graph.collect) or file + match (a literal string found exactly once, for YAML/systemd/shell).
+#   Line numbers are resolved at build time; tests/test_architecture_map.py fails if a ref goes stale.
+# views: what each tab shows. place maps node id -> [x, y] (top-left, box is 184 x 58). Edge kinds: flow,
+#   send, conditional, data, resume, uses. Optional edge keys: label, summary, ref, from_side/to_side
+#   (l r t b), from_offset/to_offset (px along that side), bend, label_t (label position along the edge, 0-1).
+
+repo: yanirfigo/langgraph-agent-showcase
+title: Job Copilot Architecture Map
+intro: '<p>Job Copilot is a production-style LangGraph agent. This map shows its two processes, two graphs, four
+  subagents and the guards around them. Every box and every labelled routing edge is linked to the code that implements
+  it.</p><ol><li><b>Click a box</b> to see what it does, how it is done, and the exact code, with a link to the
+  lines on GitHub.</li><li><b>Click a routing edge</b> (amber, or with a label like <i>Send × N</i>) to see the
+  Python function that makes that decision. No model ever picks the next step.</li><li><b>Switch views</b> with
+  the tabs. Boxes marked <i>open view</i> zoom into that part.</li><li>Search finds components by name, function
+  or file.</li></ol><p>Shapes: a hexagon is a decision made in code, a double border is a model call, a pill with
+  a pause sign is an <code>interrupt()</code>, a cylinder is storage, a notched box is a guard, a box with long
+  dashes is outside the process, and one with short dashes is a tool the model can call.</p><p>The code locations
+  are resolved from the source when the page is built, so the line numbers and snippets always match the commit
+  shown in the header.</p>'
+views:
+- id: overview
+  label: Overview
+  description: Two processes and two LangGraph graphs. Click a component for its code; boxes marked 'open view'
+    zoom into that part.
+  groups: []
+  place:
+    run_main: [0, 0]
+    run_ingest: [260, 0]
+    ov_run: [520, 0]
+    select_digest: [780, 0]
+    offer: [1040, 0]
+    ov_ops: [0, 150]
+    ov_subagents: [520, 150]
+    checkpointer: [780, 150]
+    telegram_client: [1040, 150]
+    ov_evals: [0, 300]
+    ov_app: [780, 300]
+    bot_handle_update: [1040, 300]
+  edges:
+  - {from: ov_ops, to: run_main, label: 'timer, every 2 h', kind: uses}
+  - {from: run_main, to: run_ingest}
+  - {from: run_ingest, to: ov_run, label: new postings, kind: data}
+  - {from: ov_run, to: ov_subagents, label: 'screen, research', kind: uses}
+  - {from: ov_run, to: select_digest, label: routed postings, kind: data}
+  - {from: select_digest, to: offer, label: top items}
+  - {from: offer, to: checkpointer, label: 1. checkpoint, kind: data}
+  - {from: offer, to: telegram_client, label: 2. send buttons}
+  - {from: telegram_client, to: bot_handle_update, label: button press}
+  - {from: bot_handle_update, to: ov_app, label: resume, kind: resume}
+  - {from: ov_app, to: checkpointer, label: state, kind: data}
+  - {from: ov_app, to: ov_subagents, label: draft, kind: uses}
+  - {from: ov_evals, to: ov_subagents, label: gates every change, kind: uses}
+- id: run
+  label: Scheduled run
+  description: run.py, started by a systemd timer every 2 hours. Ingest is plain Python; the run graph screens in
+    parallel and routes in code; the digest is offered with buttons.
+  groups:
+  - label: Ingest
+    sublabel: run.py, ingest/ · plain Python, no model
+    x: -25
+    y: -60
+    w: 1010
+    h: 145
+  - label: Run graph
+    sublabel: graph.py · START → screen ×N → collect → research ≤3 → END
+    x: -25
+    y: 110
+    w: 1735
+    h: 275
+  - label: Digest and delivery
+    sublabel: run.py, digest.py, application.offer
+    x: -25
+    y: 395
+    w: 1260
+    h: 275
+  place:
+    run_main: [750, 0]
+    preflight: [500, 0]
+    fetch_sources: [250, 0]
+    run_ingest: [0, 0]
+    fan_out: [0, 170]
+    screen: [250, 170]
+    route_for: [500, 170]
+    collect: [750, 170]
+    to_research: [1000, 170]
+    research: [1250, 170]
+    research_subagent: [1500, 170]
+    title_guard: [100, 300]
+    screener_subagent: [340, 300]
+    select_digest: [1000, 455]
+    digest_text: [750, 455]
+    telegram_send: [500, 455]
+    offer: [250, 455]
+    telegram_client: [0, 455]
+    requeue: [500, 585]
+    checkpointer: [250, 585]
+  edges:
+  - {from: run_main, to: preflight}
+  - {from: preflight, to: fetch_sources}
+  - {from: fetch_sources, to: run_ingest, kind: data}
+  - {from: run_ingest, to: fan_out, label: new postings, kind: data}
+  - from: fan_out
+    to: screen
+    label: Send × N
+    kind: send
+    ref: {file: src/job_copilot/graph.py, symbol: build_graph.fan_out, label: fan_out()}
+  - {from: screen, to: title_guard, label: '1', kind: uses}
+  - {from: screen, to: screener_subagent, label: '2', kind: uses}
+  - {from: screen, to: route_for, label: 3. FitScore}
+  - from: route_for
+    to: collect
+    label: screen → collect
+    summary: The real graph edge is screen → collect (add_edge). route_for runs inside screen and sets the route
+      on each Screened item; collect gathers them through an operator.add reducer.
+    ref: {file: src/job_copilot/graph.py, symbol: build_graph, label: build_graph() wiring}
+  - {from: collect, to: to_research}
+  - from: to_research
+    to: research
+    label: Send ≤ 3
+    kind: send
+    ref: {file: src/job_copilot/graph.py, symbol: build_graph.to_research, label: to_research()}
+  - {from: research, to: research_subagent, kind: uses}
+  - {from: collect, to: select_digest, label: final routes, kind: data}
+  - {from: research, to: digest_text, label: checked briefs, kind: data}
+  - {from: select_digest, to: digest_text}
+  - {from: digest_text, to: telegram_send}
+  - {from: telegram_send, to: offer, label: top items}
+  - {from: offer, to: checkpointer, label: 1. checkpoint, kind: data}
+  - {from: offer, to: telegram_client, label: 2. send}
+  - {from: telegram_send, to: requeue, label: undelivered, kind: data}
+- id: subagents
+  label: Subagents & guards
+  description: Least privilege per subagent. Screener and draft have no tools; research has read-only web tools;
+    every fetched page passes the SSRF guard and comes back quoted as untrusted data.
+  groups:
+  - {label: Shared, sublabel: 'budget.py, textsafe.py', x: 525, y: -230, w: 785, h: 140}
+  - {label: Screener, sublabel: screener.py, x: -25, y: -60, w: 235, h: 275}
+  - label: Research
+    sublabel: research.py, tools/web.py
+    x: 275
+    y: -60
+    w: 735
+    h: 535
+  - {label: Draft, sublabel: draft.py, x: 1075, y: -60, w: 235, h: 405}
+  place:
+    daily_cap: [550, -170]
+    defang: [1100, -170]
+    screener_subagent: [0, 0]
+    posting_block: [0, 130]
+    research_subagent: [550, 0]
+    run_with_timeout: [800, 0]
+    web_search: [300, 130]
+    fetch_page_tool: [550, 130]
+    check_claims: [800, 130]
+    track_search: [300, 260]
+    url_guard: [550, 260]
+    wrap_page: [800, 260]
+    pinned_fetcher: [550, 390]
+    draft_subagent: [1100, 0]
+    evidence_check: [1100, 130]
+    self_check: [1100, 260]
+  edges:
+  - {from: screener_subagent, to: daily_cap, kind: uses, from_side: t, to_side: l}
+  - {from: research_subagent, to: daily_cap, kind: uses}
+  - from: draft_subagent
+    to: daily_cap
+    kind: uses
+    from_side: l
+    to_side: r
+    bend: 40
+  - {from: screener_subagent, to: posting_block, label: prompt, kind: uses}
+  - {from: run_with_timeout, to: research_subagent, label: 300 s}
+  - {from: research_subagent, to: web_search, kind: uses}
+  - {from: research_subagent, to: fetch_page_tool, kind: uses}
+  - {from: research_subagent, to: check_claims, label: CompanyBrief, kind: data}
+  - {from: web_search, to: track_search, label: counted, kind: uses}
+  - {from: fetch_page_tool, to: url_guard, label: every URL}
+  - {from: url_guard, to: pinned_fetcher, label: 'host, IP'}
+  - from: pinned_fetcher
+    to: wrap_page
+    label: text
+    kind: data
+    from_side: r
+    to_side: b
+  - {from: draft_subagent, to: evidence_check, label: Draft}
+  - {from: evidence_check, to: self_check, label: quotes verified}
+- id: hitl
+  label: Human in the loop
+  description: One application thread per offered posting, checkpointed in SQLite. The bot resumes it with Command(resume=...)
+    when the owner presses a button, even after a restart.
+  groups:
+  - label: Bot process
+    sublabel: bot.py · job-copilot-bot.service
+    x: 725
+    y: -225
+    w: 735
+    h: 310
+  - label: Application thread
+    sublabel: application.py · pauses only in ask and ask_after
+    x: -25
+    y: 110
+    w: 1235
+    h: 445
+  place:
+    checkpointer: [0, 0]
+    offer: [250, 0]
+    telegram_client: [500, 0]
+    bot_handle_update: [750, 0]
+    bot_main: [1000, 0]
+    owner_feedback: [1250, 0]
+    state_store: [500, -150]
+    app_record_saved: [0, 190]
+    app_ask: [250, 190]
+    app_draft: [500, 190]
+    app_ask_after: [750, 190]
+    app_record_applied: [1000, 190]
+    app_record_dismissed: [0, 330]
+    app_record_discarded: [750, 330]
+    draft_subagent: [500, 470]
+    evidence_check: [750, 470]
+    self_check: [1000, 470]
+  edges:
+  - {from: offer, to: checkpointer, label: 1. checkpoint, kind: data}
+  - {from: offer, to: telegram_client, label: 2. send}
+  - {from: offer, to: app_ask, label: parks at ask, kind: data}
+  - {from: telegram_client, to: bot_handle_update, label: button press}
+  - {from: bot_main, to: bot_handle_update, label: each update}
+  - {from: bot_handle_update, to: state_store, label: token → thread, kind: data}
+  - {from: bot_main, to: owner_feedback, label: after press, kind: uses}
+  - from: bot_handle_update
+    to: app_ask
+    label: Command(resume)
+    kind: resume
+    from_side: b
+    to_side: t
+    bend: 40
+    label_t: 0.35
+    ref: {file: src/job_copilot/bot.py, symbol: handle_update, label: handle_update()}
+    summary: handle_update checks the owner, maps the button token to its thread, finishes any node a crash cut
+      off, then resumes the paused thread with Command(resume=action).
+  - from: app_ask
+    to: app_draft
+    label: draft
+    kind: conditional
+    summary: Plain Python dict lookup that picks the next node from the owner's first choice. No model is involved.
+    ref:
+      file: src/job_copilot/application.py
+      symbol: build_app_graph.after_ask
+      label: after_ask()
+  - from: app_ask
+    to: app_record_dismissed
+    label: not for me
+    kind: conditional
+    from_offset: -50
+    summary: Plain Python dict lookup that picks the next node from the owner's first choice. No model is involved.
+    ref:
+      file: src/job_copilot/application.py
+      symbol: build_app_graph.after_ask
+      label: after_ask()
+  - from: app_ask
+    to: app_record_saved
+    label: save
+    kind: conditional
+    from_side: l
+    to_side: r
+    from_offset: -11
+    to_offset: -11
+    summary: Plain Python dict lookup that picks the next node from the owner's first choice. No model is involved.
+    ref:
+      file: src/job_copilot/application.py
+      symbol: build_app_graph.after_ask
+      label: after_ask()
+  - from: app_record_saved
+    to: app_ask
+    label: back
+    from_side: r
+    to_side: l
+    from_offset: 11
+    to_offset: 11
+  - from: app_draft
+    to: app_ask_after
+    label: sent
+    kind: conditional
+    ref:
+      file: src/job_copilot/application.py
+      symbol: build_app_graph.after_draft
+      label: after_draft()
+  - from: app_draft
+    to: app_ask
+    label: failed
+    kind: conditional
+    from_side: t
+    to_side: t
+    bend: 40
+    ref:
+      file: src/job_copilot/application.py
+      symbol: build_app_graph.after_draft
+      label: after_draft()
+  - from: app_ask_after
+    to: app_record_applied
+    label: applied
+    kind: conditional
+    summary: Plain Python dict lookup that routes the owner's after-draft choice. No model is involved.
+    ref:
+      file: src/job_copilot/application.py
+      symbol: build_app_graph.after_ask_after
+      label: after_ask_after()
+  - from: app_ask_after
+    to: app_record_discarded
+    label: discard
+    kind: conditional
+    summary: Plain Python dict lookup that routes the owner's after-draft choice. No model is involved.
+    ref:
+      file: src/job_copilot/application.py
+      symbol: build_app_graph.after_ask_after
+      label: after_ask_after()
+  - from: app_record_discarded
+    to: app_ask
+    label: back
+    from_side: l
+    to_side: b
+    to_offset: 50
+  - {from: app_draft, to: draft_subagent, kind: uses}
+  - {from: draft_subagent, to: evidence_check, label: Draft}
+  - {from: evidence_check, to: self_check, label: verified}
+  - {from: offer, to: state_store, label: 'token, message id', kind: data}
+  - from: bot_handle_update
+    to: app_ask_after
+    label: Command(resume)
+    kind: resume
+    summary: 'The same resume path serves the second pause: when the thread waits in ask_after, Applied and Discard
+      are the accepted actions.'
+    ref: {file: src/job_copilot/bot.py, symbol: handle_update, label: handle_update()}
+- id: evals
+  label: Evals
+  description: Evals are a release gate. gate.py runs three LangSmith suites as subprocesses and passes only if
+    all three pass. Owner decisions from the tracker are promoted weekly into a live dataset; each press is also
+    sent to LangSmith as feedback on its screening run.
+  groups:
+  - label: Owner feedback loop
+    sublabel: promote_feedback.py reads the tracker in state.sqlite
+    x: 275
+    y: -215
+    w: 960
+    h: 140
+  - {label: Release gate, sublabel: evals/gate.py, x: -25, y: -60, w: 910, h: 405}
+  - label: LangSmith feedback
+    sublabel: feedback.py, on each press
+    x: 1275
+    y: -60
+    w: 235
+    h: 145
+  place:
+    release_gate: [0, 130]
+    screener_eval: [300, 0]
+    redteam_eval: [300, 130]
+    draft_eval: [300, 260]
+    eval_config: [650, 130]
+    promote_feedback: [650, -150]
+    owner_feedback: [1300, 0]
+    state_store: [1000, -150]
+  edges:
+  - {from: release_gate, to: screener_eval, label: '1'}
+  - {from: release_gate, to: redteam_eval, label: '2'}
+  - {from: release_gate, to: draft_eval, label: '3'}
+  - {from: screener_eval, to: eval_config, kind: uses}
+  - {from: redteam_eval, to: eval_config, kind: uses}
+  - {from: draft_eval, to: eval_config, kind: uses}
+  - {from: promote_feedback, to: screener_eval, label: fit-labels-live, kind: data}
+  - {from: state_store, to: promote_feedback, label: owner decisions, kind: data}
+- id: ops
+  label: Deploy & config
+  description: Hardened systemd user units, a test-first installer, CI without keys, and the process setup every
+    entry point shares.
+  groups:
+  - {label: Deploy, sublabel: 'deploy/, .github/', x: -25, y: -60, w: 560, h: 405}
+  - label: Process setup
+    sublabel: config, secrets, logs, tracing
+    x: 625
+    y: -60
+    w: 510
+    h: 405
+  place:
+    ci: [0, 0]
+    install_sh: [0, 130]
+    run_timer: [325, 0]
+    bot_service: [325, 130]
+    promote_timer: [325, 260]
+    config_yaml: [650, 0]
+    load_config: [925, 0]
+    load_secrets: [650, 130]
+    logsafe: [925, 130]
+    tracing: [650, 260]
+  edges:
+  - {from: install_sh, to: run_timer, kind: uses}
+  - {from: install_sh, to: bot_service, label: enable, kind: uses}
+  - {from: install_sh, to: promote_timer, kind: uses}
+  - {from: config_yaml, to: load_config, label: validated, kind: data}
+nodes:
+- id: run_main
+  label: Scheduled run
+  sublabel: systemd timer -> run.main
+  kind: entry
+  summary: A systemd timer starts `python -m job_copilot.run` eight times a day as a oneshot service. main() loads
+    config and secrets, sets the per-run posting cap and opens the SQLite store.
+  how:
+  - Timer fires at 08,10,12,14,16,18,20,22:00 Asia/Jerusalem with RandomizedDelaySec=120; the service is killed
+    after RuntimeMaxSec=1800.
+  - Without --dry-run, a missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID returns exit code 2 before anything is fetched
+    or spent.
+  - cap = min(--limit or max_postings_per_run, max_postings_per_run), so --limit can lower the cap of 40 but never
+    raise it.
+  - Secrets come from load_secrets() and are passed explicitly to _run(); the store is always closed in a finally
+    block.
+  rule: secrets
+  refs:
+  - {file: src/job_copilot/run.py, symbol: main, label: main()}
+  - file: config/config.yaml
+    match: 'max_postings_per_run: 40'
+    label: 'max_postings_per_run: 40'
+- id: preflight
+  label: Build before ingest
+  sublabel: graph, subagents, delivery
+  kind: step
+  summary: _run() builds the run graph, the screener and researcher subagents, and (outside a dry run) the Telegram
+    client and application graph before ingest marks any posting seen.
+  how:
+  - build_graph(cfg, build_screener(cfg, secrets, load_profile()), build_researcher(cfg, secrets)[0]) runs first,
+    so a bad profile fails before ingest.
+  - _delivery() creates Telegram(token, chat_id), the drafter, and the application graph with a SqliteSaver on the
+    bot's CHECKPOINTS file.
+  - In a dry run, tg and app are None and nothing is delivered.
+  - first_run is True until a non-dry run_ingest() has written the 'initialised' meta row.
+  refs:
+  - {file: src/job_copilot/run.py, symbol: _run, label: _run()}
+  - {file: src/job_copilot/run.py, symbol: _delivery, label: _delivery()}
+- id: fetch_sources
+  label: Fetch sources
+  sublabel: ingest, no model calls
+  kind: external
+  summary: 'default_fetchers() returns the source fetchers in run order: configured company passes first, then Ocean
+    of Jobs, then the TechMap CSVs (cached for 6 hours).'
+  how:
+  - Company passes run first so their wider tagging (roles or 'wide-net') wins the dedupe; the repo default list
+    is empty and config.local.yaml can replace it.
+  - Ocean of Jobs is queried with israel_only=1, limit=500 and max_age_days 7 on the first run, 2 after.
+  - TechMap reads 7 category CSVs; only rows whose title matches a target role are kept, and the result is cached
+    in SQLite for 6 hours.
+  - Responses are capped (10 MB Ocean, 5 MB per CSV) with a 30 s overall deadline; a redirect to a host other than
+    oceanofjobs.com or raw.githubusercontent.com raises FetchError.
+  - The httpx client ignores proxy env (trust_env=False), follows at most 3 redirects and uses fetch_timeout_s 15.
+  rule: untrusted text
+  refs:
+  - file: src/job_copilot/ingest/__init__.py
+    symbol: default_fetchers
+    label: default_fetchers()
+  - {file: src/job_copilot/ingest/sources.py, symbol: fetch_bytes, label: fetch_bytes()}
+  - {file: src/job_copilot/ingest/sources.py, symbol: make_client, label: make_client()}
+  - file: src/job_copilot/ingest/__init__.py
+    symbol: _techmap_cached
+    label: _techmap_cached()
+- id: run_ingest
+  label: Filter and dedupe
+  sublabel: run_ingest
+  kind: step
+  summary: run_ingest() puts the pending queue first, adds every source batch, drops excluded or off-role titles
+    and already-seen keys, then caps what is reported this run.
+  how:
+  - One failing source only adds an error string; AllSourcesFailed is raised only when every fetcher failed and
+    nothing was collected, pending included (run exits 1).
+  - Titles matching EXCLUDE (intern, student, junior, PhD, hardware, chip, SDR, BDR, product marketing...) are skipped.
+  - A posting with no roles of its own and no ROLE match (gtm, bizapps, ai) is skipped; AI-only matches on ML/infra
+    titles count as no match.
+  - Keys in the seen table (pruned after 90 days) or already in this batch are skipped.
+  - Outside a dry run, only the reported slice is marked seen; the overflow replaces the pending queue for the next
+    run.
+  rule: limits
+  refs:
+  - {file: src/job_copilot/ingest/__init__.py, symbol: run_ingest, label: run_ingest()}
+  - {file: src/job_copilot/ingest/filters.py, symbol: role_of, label: role_of()}
+  - {file: src/job_copilot/ingest/filters.py, symbol: EXCLUDE, label: EXCLUDE}
+  - file: src/job_copilot/ingest/__init__.py
+    symbol: SEEN_TTL_DAYS
+    label: SEEN_TTL_DAYS = 90
+- id: fan_out
+  label: fan_out
+  sublabel: START edge, Send x N
+  kind: router
+  summary: The conditional edge from START sends each new posting to its own `screen` task with LangGraph Send,
+    so postings are screened in parallel.
+  how:
+  - 'Returns [Send("screen", {"posting": p})] for state["new"][:max_postings_per_run] (40).'
+  - A plain Python function over state; no model picks the next node.
+  - run.py invokes the graph with recursion_limit = graph_recursion_limit (60).
+  rule: routing is Python
+  refs:
+  - {file: src/job_copilot/graph.py, symbol: build_graph.fan_out, label: fan_out()}
+  - {file: src/job_copilot/graph.py, symbol: build_graph, label: build_graph()}
+- id: title_guard
+  label: Title deal-breaker
+  sublabel: regex, before any model
+  kind: guard
+  summary: Before the screener runs, title_deal_breaker() checks the title for maternity-cover or contract/temporary
+    wording. A match drops the posting with no model call.
+  how:
+  - '''maternity cover'' matches ''maternity'', ''parental leave cover'' or the Hebrew forms.'
+  - '''contract / temporary'' matches contractor, (contract), contract role/position/basis/job, a title starting
+    with ''contract'', temporary, temp, freelance or the Hebrew word.'
+  - '''contracts'' (plural, as in contracts management) deliberately does not match.'
+  - 'On a match, _screen returns route=''drop'' with note ''deal-breaker in title: <name>'' and fit=None.'
+  refs:
+  - file: src/job_copilot/guards.py
+    symbol: title_deal_breaker
+    label: title_deal_breaker()
+  - {file: src/job_copilot/guards.py, symbol: _DEAL_BREAKERS, label: _DEAL_BREAKERS}
+- id: screen
+  label: screen
+  sublabel: graph node, calls screener
+  kind: graph_node
+  summary: One task per posting. It wraps _screen() in a LangSmith trace span with a fresh uuid4 run_id, calls the
+    screener subagent for a FitScore and maps failures to a safe route.
+  how:
+  - BudgetExceeded (daily model cap reached) gives route='deferred' with note 'daily model budget reached'.
+  - 'Any other screener exception gives route=''digest'' with note ''screener failed: <ExceptionType>'', so one
+    failure never sinks the batch.'
+  - On success the route comes from route_for(fit, cfg); the run_id is copied onto the result so owner feedback
+    can attach to this trace.
+  - Results are appended to state['screened'] through an operator.add reducer.
+  rule: model output is data
+  refs:
+  - {file: src/job_copilot/graph.py, symbol: build_graph.screen, label: screen()}
+  - {file: src/job_copilot/graph.py, symbol: build_graph._screen, label: _screen()}
+  - {file: src/job_copilot/graph.py, symbol: Screened, label: Screened}
+- id: route_for
+  label: route_for
+  sublabel: score -> route
+  kind: router
+  summary: Plain Python maps a validated FitScore to drop, digest or research. The fourth route, deferred, is set
+    only by screen's budget path.
+  how:
+  - deal_breaker set or score < digest_min (55) gives 'drop'.
+  - 'injection_suspected gives ''digest'': shown with a warning, never sent to web research.'
+  - score >= research_min (75) gives 'research'; anything else gives 'digest'.
+  rule: routing is Python
+  refs:
+  - {file: src/job_copilot/routing.py, symbol: route_for, label: route_for()}
+  - {file: config/config.yaml, match: 'digest_min: 55', label: 'digest_min: 55'}
+  - {file: config/config.yaml, match: 'research_min: 75', label: 'research_min: 75'}
+- id: collect
+  label: collect
+  sublabel: graph node, research budget
+  kind: graph_node
+  summary: 'After all screen tasks finish, collect applies the per-run research budget: the highest-scoring ''research''
+    postings keep their route and the rest are moved to the digest.'
+  how:
+  - Sorts research-routed items by fit score, highest first (0 when there is no FitScore).
+  - Items beyond max_research_per_run (3) become route='digest' with note 'research budget used up'.
+  - Writes the full list, in original order, to state['final'].
+  rule: limits
+  refs:
+  - {file: src/job_copilot/graph.py, symbol: build_graph.collect, label: collect()}
+  - file: config/config.yaml
+    match: 'max_research_per_run: 3'
+    label: 'max_research_per_run: 3'
+- id: to_research
+  label: to_research
+  sublabel: edge, Send x <= 3 or END
+  kind: router
+  summary: The conditional edge after collect sends each posting still routed 'research' to a research task, or
+    ends the graph when there is none.
+  how:
+  - Returns END when no researcher was built (research_fn is None).
+  - 'Otherwise returns [Send("research", {"posting": s.posting})] for route == ''research'', or END if that list
+    is empty.'
+  rule: routing is Python
+  refs:
+  - {file: src/job_copilot/graph.py, symbol: build_graph.to_research, label: to_research()}
+- id: research
+  label: research
+  sublabel: graph node, 300 s deadline
+  kind: graph_node
+  summary: Calls the research subagent for one posting under a hard wall-clock timeout and records either a CheckedBrief
+    or an error string. A failed brief never fails the run.
+  how:
+  - run_with_timeout() runs the call in a daemon thread with research_timeout_s (300 s); a timeout records error
+    'research timed out'.
+  - 'Any other exception records ''<Type>: <first 200 chars of the message>''.'
+  - Each result is appended to state['briefs'] as Researched(key, brief, error); the graph then ends.
+  rule: least privilege
+  refs:
+  - {file: src/job_copilot/graph.py, symbol: build_graph.research, label: research()}
+  - {file: src/job_copilot/graph.py, symbol: Researched, label: Researched}
+  - file: config/config.yaml
+    match: 'research_timeout_s: 300'
+    label: 'research_timeout_s: 300'
+- id: select_digest
+  label: select_digest
+  sublabel: pure selection
+  kind: step
+  summary: '_report() passes the graph''s final list to select_digest(), which builds a DigestPlan: top items get
+    buttons, the rest are listed compactly, deferred items are set aside and drops are counted.'
+  how:
+  - Shown = research and digest routes, sorted research first, then by score descending.
+  - top = first max_digest_items (8); more = the remainder; deferred = route 'deferred'; dropped = count of 'drop'.
+  - Dropped postings stay marked seen; deferred ones remain undelivered and are requeued.
+  - With --dry-run the summary, top items and overflow list are printed instead of sent, and _report returns 0.
+  rule: limits
+  refs:
+  - {file: src/job_copilot/digest.py, symbol: select_digest, label: select_digest()}
+  - {file: src/job_copilot/run.py, symbol: _report, label: _report()}
+  - {file: config/config.yaml, match: 'max_digest_items: 8', label: 'max_digest_items: 8'}
+- id: digest_text
+  label: Digest text
+  sublabel: defang before Telegram
+  kind: guard
+  summary: item_text, more_text and summary_text build plain-text Telegram messages. Posting fields and all model
+    text are defanged and capped, and model text also loses quoted spans; only the posting URL is left as is.
+  how:
+  - model_text() = sanitize(defang(scrub_quotes(text)), cap); field_text() = sanitize(defang(text), cap), default
+    cap 200.
+  - An injection-suspected posting gets the line 'This posting contains text aimed at an AI. It was not researched;
+    treat it with care.'
+  - A brief shows its company summary (400 chars), at most 3 verified claims, 2 unverified claims and 3 flags; the
+    posting URL is the only clickable link.
+  - more_text lists up to 20 items as 'score · title · company' with no buttons, then '...and N more'.
+  rule: untrusted text
+  refs:
+  - {file: src/job_copilot/digest.py, symbol: item_text, label: item_text()}
+  - {file: src/job_copilot/digest.py, symbol: model_text, label: model_text()}
+  - {file: src/job_copilot/digest.py, symbol: more_text, label: more_text()}
+  - {file: src/job_copilot/digest.py, symbol: summary_text, label: summary_text()}
+- id: offer
+  label: offer()
+  sublabel: park thread, then send
+  kind: step
+  summary: Called by the daily run for each top posting in the digest. It starts an application thread, lets it
+    pause at ask, and only then sends the Telegram message with Draft, Save and Not for me buttons.
+  how:
+  - 'Thread id is thread_id_for(key): "app-" plus the first 24 hex chars of sha256(posting key), so one posting
+    always maps to one thread.'
+  - If app.get_state(config).values is already set it returns None, so a posting is never offered twice.
+  - Checkpoint first, message second, so a button can never point at a thread that does not exist.
+  - If tg.send raises TelegramError, checkpointer.delete_thread(tid) removes the thread and the error propagates;
+    run._report logs it and the posting is requeued.
+  - buttons() mints one fresh store token per call; each button's callback data is "<token>:<action>".
+  refs:
+  - {file: src/job_copilot/application.py, symbol: offer, label: offer()}
+  - {file: src/job_copilot/application.py, symbol: thread_id_for, label: thread_id_for()}
+  - {file: src/job_copilot/application.py, symbol: buttons, label: buttons()}
+  - {file: src/job_copilot/run.py, symbol: _report, label: run._report() calls offer}
+- id: telegram_send
+  label: _report()
+  sublabel: deliver, link runs, requeue
+  kind: step
+  summary: _report() links each shown posting to its screening run, sends the summary, the offers and the overflow
+    list, and removes each delivered posting from the undelivered set.
+  how:
+  - Dropped postings are removed from undelivered first, so they stay seen and are not requeued.
+  - link_run() stores key, run_id, route, score and the posting for every top and more item so owner feedback reaches
+    the right LangSmith run.
+  - The summary is sent only if there are top items, deferred items or source errors; a failed summary send is only
+    logged.
+  - An offer or overflow-list TelegramError is logged and those postings stay undelivered for requeue.
+  refs:
+  - {file: src/job_copilot/run.py, symbol: _report, label: _report()}
+  - {file: src/job_copilot/store.py, symbol: Store.link_run, label: Store.link_run()}
+- id: requeue
+  label: Requeue
+  sublabel: Store.requeue, SQLite
+  kind: store
+  summary: Whatever was marked seen but not delivered goes back to the front of the pending queue and is un-marked
+    as seen, so no run loses a posting.
+  how:
+  - 'Normal path: _report requeues what is left in undelivered (deferred items and failed sends), then clears it.'
+  - 'Failure path: if _report raises anything, _run requeues all undelivered postings (unless dry run); an Exception
+    returns 1, anything else (e.g. KeyboardInterrupt) is re-raised.'
+  - Store.requeue() deletes the keys from 'seen' and rewrites 'pending' as the requeued items followed by the existing
+    queue.
+  refs:
+  - {file: src/job_copilot/store.py, symbol: Store.requeue, label: Store.requeue()}
+  - {file: src/job_copilot/run.py, symbol: _run, label: _run() failure path}
+  - {file: src/job_copilot/store.py, symbol: Store.set_pending, label: Store.set_pending()}
+- id: screener_subagent
+  label: Screener subagent
+  sublabel: no tools, FitScore out
+  kind: subagent
+  summary: Scores one posting against the profile with the screener model and no tools. Its only output is a pydantic
+    FitScore, which plain Python routing reads.
+  how:
+  - Model cfg.models.screener (claude-haiku-5-5), max_tokens=600, timeout=60, max_retries=2; create_agent(tools=[])
+    with response_format=FitScore.
+  - The profile YAML goes into the system prompt inside <profile>; the posting comes in as the human message from
+    posting_block().
+  - 'FitScore has extra="forbid": score 0-100, reason max 300 chars, matched/concerns max 5 each, deal_breaker (str
+    or null), injection_suspected.'
+  - 'Middleware: DailyModelCallCap, then ModelCallLimitMiddleware(run_limit=screener_model_calls_per_run=2, exit_behavior="error").'
+  - The result is re-validated with FitScore.model_validate(out["structured_response"]) before it is returned.
+  rule: least privilege
+  refs:
+  - file: src/job_copilot/subagents/screener.py
+    symbol: build_screener
+    label: build_screener()
+  - {file: src/job_copilot/subagents/screener.py, symbol: FitScore, label: FitScore}
+  - {file: src/job_copilot/subagents/screener.py, symbol: SYSTEM, label: SYSTEM rubric}
+- id: posting_block
+  label: Posting quoted as data
+  sublabel: posting_block()
+  kind: guard
+  summary: Wraps posting fields in a <posting> tag so the model treats them as untrusted data. The screener, research
+    and draft subagents all reuse it.
+  how:
+  - Title, company, city, seniority and role tags each pass through sanitize() at 300 chars, which strips control
+    and format characters.
+  - The description, if present, is sanitized to 6000 chars with line breaks kept.
+  - Every < and > in the body becomes ‹ and ›, so posting text cannot close the <posting> tag.
+  - The screener SYSTEM prompt tells the model to set injection_suspected=true for text addressed to an AI and to
+    score only the real job content.
+  rule: untrusted text
+  refs:
+  - file: src/job_copilot/subagents/screener.py
+    symbol: posting_block
+    label: posting_block()
+- id: research_subagent
+  label: Research subagent
+  sublabel: read-only web tools
+  kind: subagent
+  summary: Writes a cited CompanyBrief for one posting. It never sees the profile or CV, and its only tools are
+    the guarded fetch_page and Anthropic's server-side web_search.
+  how:
+  - Model cfg.models.research (claude-sonnet-5-5), max_tokens=2000, timeout=120, max_retries=2; ModelFallbackMiddleware
+    to cfg.models.fallback (claude-haiku-5-5) when no model is injected.
+  - 'Middleware: DailyModelCallCap, track_search, ToolCallLimitMiddleware(run_limit=6, exit_behavior="continue"),
+    ModelCallLimitMiddleware(run_limit=8, exit_behavior="end").'
+  - A fresh UrlGuard per posting allows the static fetch_allowlist plus the posting's own exact host.
+  - If no structured_response comes back, it returns a CheckedBrief with flag "incomplete research", business_facing
+    and work_mode "unknown", and a summary saying research stopped at a limit.
+  rule: least privilege
+  refs:
+  - file: src/job_copilot/subagents/research.py
+    symbol: build_researcher
+    label: build_researcher()
+  - file: src/job_copilot/subagents/research.py
+    symbol: build_researcher.research
+    label: research()
+  - {file: src/job_copilot/subagents/research.py, symbol: SYSTEM, label: SYSTEM prompt}
+- id: web_search
+  label: Anthropic web_search
+  sublabel: server-side tool
+  kind: tool
+  summary: A server-side search tool that runs at Anthropic, not on the host. The exact URLs it returns in this
+    run, and the bare homepages of their hosts, become fetchable by fetch_page.
+  how:
+  - 'Added as {"type": "web_search_20250305", "name": "web_search", "max_uses": research_searches_per_run} (4 in
+    config.yaml).'
+  - Only added when use_web_search is true and research_searches_per_run > 0.
+  rule: least privilege
+  refs:
+  - file: src/job_copilot/subagents/research.py
+    symbol: build_researcher.research
+    label: tools list
+  - file: config/config.yaml
+    match: 'research_searches_per_run: 4'
+    label: 'research_searches_per_run: 4'
+- id: track_search
+  label: Search tracker
+  sublabel: after_model hook
+  kind: guard
+  summary: After each model turn, records the URLs web_search returned and counts searches. It ends the run once
+    the search count passes the budget.
+  how:
+  - _search_blocks counts server_tool_use blocks named web_search and collects each url from web_search_tool_result
+    blocks in the last message.
+  - guard.add_search_results stores those URLs with fragments stripped; they become fetchable for this run only.
+  - 'If guard.searches > research_searches_per_run (4), it returns {"jump_to": "end"}; with no structured_response
+    the brief comes back flagged "incomplete research".'
+  rule: limits
+  refs:
+  - file: src/job_copilot/subagents/research.py
+    symbol: build_researcher.research.track_search
+    label: track_search()
+  - file: src/job_copilot/subagents/research.py
+    symbol: _search_blocks
+    label: _search_blocks()
+- id: fetch_page_tool
+  label: fetch_page tool
+  sublabel: the only local net tool
+  kind: tool
+  summary: The research agent's one local tool. It fetches a page through the guard, records the text for claim
+    checks, and returns it wrapped as untrusted data.
+  how:
+  - The default fetcher reuses one make_client(fetch_timeout_s=15) client and calls fetch_page_text with max_bytes=fetch_max_bytes
+    (300000) and deadline_s=fetch_timeout_s*2 (30 s).
+  - 'A FetchRefused is appended to guard.refused as (url, reason) and returned to the model as "REFUSED: <reason>"
+    instead of being raised.'
+  - 'Both the requested and final URLs go into guard.fetched and guard.pages (keyed without the #fragment).'
+  - The return value is wrap_page(page.final, page.text).
+  rule: least privilege
+  refs:
+  - file: src/job_copilot/subagents/research.py
+    symbol: build_researcher.research.fetch_page
+    label: fetch_page()
+  - file: src/job_copilot/subagents/research.py
+    symbol: build_researcher.default_fetch
+    label: default_fetch()
+- id: url_guard
+  label: UrlGuard.check
+  sublabel: allowlist + public IPs
+  kind: guard
+  summary: Decides whether a URL may be fetched in this run and returns the IP address it approved. Every redirect
+    hop is checked again.
+  how:
+  - Needs https on port 443 (or no port), no userinfo and no backslash in the netloc; a URL that fails to parse
+    raises FetchRefused("malformed URL").
+  - 'Allowed: an allowlist domain or its subdomains, the posting''s exact host, an exact web_search URL, or the
+    bare homepage (no path, no query) of a host search returned.'
+  - 'The host must resolve to at least one IP and every IP must pass _public: is_global and not in 100.64.0.0/10
+    (tailnet). IPv4-mapped and 64:ff9b::/96 NAT64 addresses are unwrapped first.'
+  - Returns (host, ips[0]); that IP is the one the request connects to.
+  rule: untrusted text
+  refs:
+  - {file: src/job_copilot/tools/web.py, symbol: UrlGuard.check, label: UrlGuard.check()}
+  - {file: src/job_copilot/tools/web.py, symbol: UrlGuard._allowed, label: _allowed()}
+  - {file: src/job_copilot/tools/web.py, symbol: _public, label: _public()}
+  - {file: config/config.yaml, match: 'fetch_allowlist:', label: fetch_allowlist}
+- id: pinned_fetcher
+  label: SSRF-guarded fetcher
+  sublabel: pinned IP, capped body
+  kind: guard
+  summary: Connects to the IP the guard approved, with SNI and Host set to the real name, and follows redirects
+    by hand. Body size and total time are capped.
+  how:
+  - Follows up to MAX_REDIRECTS=3 redirects; each hop runs guard.check again and gets a timeout of min(remaining,
+    15 s).
+  - _peer_ip re-checks the connected address; a missing peer (when require_peer_check, the default) or a non-public
+    peer raises FetchRefused.
+  - Rejects HTTP >= 400, any content-encoding but identity, types other than text/html, text/plain or application/xhtml+xml,
+    and content-length > 20*max_bytes.
+  - 'Reads raw bytes and truncates at max_bytes. The client has follow_redirects=False, trust_env=False, no keep-alive
+    and accept-encoding: identity.'
+  - fetch_page_text wraps the whole fetch in run_with_timeout; httpx, OS and decode errors come back as a generic
+    "fetch failed".
+  rule: untrusted text
+  refs:
+  - {file: src/job_copilot/tools/web.py, symbol: _fetch_once, label: _fetch_once()}
+  - {file: src/job_copilot/tools/web.py, symbol: fetch_page_text, label: fetch_page_text()}
+  - {file: src/job_copilot/tools/web.py, symbol: _peer_ip, label: _peer_ip()}
+  - {file: src/job_copilot/tools/web.py, symbol: make_client, label: make_client()}
+- id: wrap_page
+  label: Page wrapped as data
+  sublabel: wrap_page()
+  kind: guard
+  summary: Turns HTML into text and wraps it in a <web_page trust="untrusted"> tag. Page text cannot close the tag
+    or imitate it.
+  how:
+  - html_to_text drops script, style, noscript, svg, template, title, iframe and object content; text/plain responses
+    skip this step.
+  - The body is sanitized to MAX_TEXT_CHARS=12000. Every angle-like character (< ‹ ＜ 〈 ⟨ and their closers) becomes
+    ( or ).
+  - The URL is sanitized to 500 chars, with " encoded as %22 and angle characters translated the same way.
+  rule: untrusted text
+  refs:
+  - {file: src/job_copilot/tools/web.py, symbol: wrap_page, label: wrap_page()}
+  - {file: src/job_copilot/tools/web.py, symbol: html_to_text, label: html_to_text()}
+- id: check_claims
+  label: Claim checker
+  sublabel: CompanyBrief -> Checked
+  kind: guard
+  summary: Checks the model's CompanyBrief in code. A claim counts as verified only if its source page was fetched
+    in this run and the page text supports it.
+  how:
+  - 'Verified: the URL (without #fragment) is in guard.pages and claim_supported passes: every number is on the
+    page, and at least half of the 5+ letter words are.'
+  - 'Unverified: the page was fetched but does not support the claim, or the URL came only from search. Claims citing
+    unseen URLs are removed and counted in a flag.'
+  - scrub_quotes replaces quoted spans of 4+ chars in the summary, seniority signal and red_flags with "[quoted
+    text removed]".
+  - Returns a frozen CheckedBrief with brief.claims emptied, verified/unverified lists and at most 6 flags.
+  rule: model output is data
+  refs:
+  - file: src/job_copilot/subagents/research.py
+    symbol: check_claims
+    label: check_claims()
+  - file: src/job_copilot/subagents/research.py
+    symbol: claim_supported
+    label: claim_supported()
+  - file: src/job_copilot/subagents/research.py
+    symbol: CompanyBrief
+    label: CompanyBrief
+  - file: src/job_copilot/subagents/research.py
+    symbol: CheckedBrief
+    label: CheckedBrief
+- id: draft_subagent
+  label: Draft subagent
+  sublabel: no tools, reads the CV
+  kind: subagent
+  summary: Writes an application note for one posting after the owner asks for it. This is the only place the CV
+    is read. It has no tools and nothing is sent.
+  how:
+  - Model cfg.models.draft (claude-opus-5-5), max_tokens=1500, timeout=120; create_agent(tools=[], response_format=Draft,
+    checkpointer=False).
+  - load_cv reads ~/.config/job-copilot/cv.md at draft time. On POSIX it refuses any group/other permission bits;
+    it also refuses files over 20000 bytes.
+  - 'Middleware: DailyModelCallCap, ModelCallLimitMiddleware(run_limit=2, exit_behavior="error"), and PIIMiddleware
+    that redacts emails and URLs in the output only.'
+  - 'The prompt gets posting_block plus brief_block: summary, business_facing, work_mode and up to 6 verified facts.
+    Unverified claims are left out.'
+  rule: personal data
+  refs:
+  - file: src/job_copilot/subagents/draft.py
+    symbol: build_drafter
+    label: build_drafter()
+  - {file: src/job_copilot/subagents/draft.py, symbol: load_cv, label: load_cv()}
+  - {file: src/job_copilot/subagents/draft.py, symbol: brief_block, label: brief_block()}
+- id: evidence_check
+  label: Verbatim CV evidence
+  sublabel: unverified_quotes()
+  kind: guard
+  summary: The model must list 2-6 verbatim CV quotes before writing the note. Code checks each quote against the
+    CV and retries or rejects the draft.
+  how:
+  - 'Draft.evidence is the first field: 2-6 strings of max 300 chars each. Draft has extra="forbid".'
+  - unverified_quotes compares quote and CV after collapsing whitespace, lowercasing and turning en/em dashes into
+    hyphens; edge spaces, dots and quote marks are trimmed from each quote.
+  - Up to 3 attempts; each failure appends a correction to the request. After the third, it raises DraftGroundingError.
+  rule: model output is data
+  refs:
+  - file: src/job_copilot/subagents/draft.py
+    symbol: unverified_quotes
+    label: unverified_quotes()
+  - file: src/job_copilot/subagents/draft.py
+    symbol: Draft.evidence
+    label: Draft.evidence
+  - file: src/job_copilot/subagents/draft.py
+    symbol: build_drafter.draft
+    label: draft() retry loop
+- id: self_check
+  label: Grounding self-check
+  sublabel: Haiku, structured output
+  kind: subagent
+  summary: A second pass with the screener model checks the cover note and bullets against the evidence quotes.
+    It returns a rewrite that tones down or removes unsupported claims.
+  how:
+  - 'Checker: cfg.models.screener (claude-haiku-5-5) with max_tokens=4000 and with_structured_output(SelfCheck,
+    method="json_schema").'
+  - This call is counted by hand with count_model_call, because it runs outside the agent middleware.
+  - If claims are unsupported and no revised note comes back, it raises DraftGroundingError.
+  - Revisions are capped at 1500 chars and 5 bullets of 250 chars, then re-validated as a Draft.
+  rule: model output is data
+  refs:
+  - {file: src/job_copilot/subagents/draft.py, symbol: self_check, label: self_check()}
+  - {file: src/job_copilot/subagents/draft.py, symbol: SelfCheck, label: SelfCheck}
+- id: daily_cap
+  label: Daily model-call cap
+  sublabel: SQLite, shared count
+  kind: guard
+  summary: One per-day count of model calls in SQLite, shared by all subagents and across restarts. Once the count
+    passes the cap, model calls are refused.
+  how:
+  - DailyModelCallCap.before_model calls count_model_call before every model call in all three subagents; the draft
+    self-check calls it directly.
+  - An upsert on usage(day, model_calls) for today's date in Asia/Jerusalem adds one call atomically.
+  - When the count passes limits.daily_model_calls (400), so on call 401, it raises BudgetExceeded.
+  rule: limits
+  refs:
+  - {file: src/job_copilot/budget.py, symbol: count_model_call, label: count_model_call()}
+  - {file: src/job_copilot/budget.py, symbol: DailyModelCallCap, label: DailyModelCallCap}
+  - file: config/config.yaml
+    match: 'daily_model_calls: 400'
+    label: 'daily_model_calls: 400'
+- id: defang
+  label: Defang for Telegram
+  sublabel: textsafe.defang()
+  kind: guard
+  summary: Makes untrusted and model-written text safe to show in Telegram, so nothing in it becomes a clickable
+    link, email or @mention.
+  how:
+  - Scheme URLs (http, https, ftp, tg) become "[link removed]"; emails become "[email removed]".
+  - Dots in remaining domain-like tokens become U+2024 (one-dot leader) and every @ becomes U+FF20 (fullwidth @).
+  - Called by digest.model_text (after scrub_quotes) and field_text, and by draft_text on the title, company, note,
+    bullets and gaps.
+  rule: untrusted text
+  refs:
+  - {file: src/job_copilot/textsafe.py, symbol: defang, label: defang()}
+  - {file: src/job_copilot/digest.py, symbol: model_text, label: digest.model_text()}
+  - {file: src/job_copilot/subagents/draft.py, symbol: draft_text, label: draft_text()}
+- id: run_with_timeout
+  label: Hard timeout
+  sublabel: daemon thread
+  kind: guard
+  summary: Runs a call in a daemon thread with a hard wall-clock limit. The caller stops waiting at the limit, and
+    a hung call cannot keep the process alive at exit.
+  how:
+  - Joins the thread for the timeout and raises TimeoutError if it is still alive; errors from the worker are re-raised
+    in the caller.
+  - The graph's research node uses it with research_timeout_s (300 s) and records "research timed out"; other errors
+    are recorded as the type name plus 200 chars.
+  - fetch_page_text uses deadline_s + 1 (31 s) and maps a TimeoutError to FetchRefused("page took too long").
+  rule: limits
+  refs:
+  - file: src/job_copilot/timeouts.py
+    symbol: run_with_timeout
+    label: run_with_timeout()
+  - file: src/job_copilot/graph.py
+    symbol: build_graph.research
+    label: graph research node
+  - file: config/config.yaml
+    match: 'research_timeout_s: 300'
+    label: 'research_timeout_s: 300'
+- id: app_ask
+  label: ask
+  sublabel: 'interrupt: first choice'
+  kind: interrupt
+  summary: The first pause of every application thread. It only calls interrupt() and waits for the owner's first
+    button press.
+  how:
+  - 'Calls interrupt({"stage": "first", "key": key}); the thread is checkpointed in SQLite and the process can exit.'
+  - On resume, the value is kept only if it is one of FIRST = ("draft", "save", "dismiss"); anything else becomes
+    "invalid".
+  - Has no side effects, so re-running it after a crash is harmless.
+  rule: untrusted text
+  refs:
+  - {file: src/job_copilot/application.py, symbol: build_app_graph.ask, label: ask()}
+  - {file: src/job_copilot/application.py, symbol: FIRST, label: FIRST actions}
+- id: app_record_saved
+  label: record_saved
+  sublabel: side effect, no interrupt
+  kind: graph_node
+  summary: Marks the posting as saved in the tracker and replaces the posting message's buttons with Draft and Not
+    for me, then returns to ask.
+  how:
+  - Writes status "saved" to the applications table via store.set_status.
+  - Calls tg.set_buttons on the stored "<tid>" message id with a new token and actions ("draft", "dismiss").
+  - set_buttons is best effort. If the edit fails, the original Draft / Save / Not for me buttons keep working,
+    because the thread is back at ask and still accepts first-stage actions.
+  - Fixed edge record_saved -> ask.
+  refs:
+  - file: src/job_copilot/application.py
+    symbol: build_app_graph.record_saved
+    label: record_saved()
+- id: app_record_dismissed
+  label: record_dismissed
+  sublabel: side effect, ends thread
+  kind: graph_node
+  summary: Marks the posting as dismissed and removes the buttons from its message. The thread then ends.
+  how:
+  - Writes status "dismissed" to the tracker.
+  - Calls tg.set_buttons(message, None), which sends an empty inline keyboard.
+  - Fixed edge record_dismissed -> END.
+  refs:
+  - file: src/job_copilot/application.py
+    symbol: build_app_graph.record_dismissed
+    label: record_dismissed()
+- id: app_draft
+  label: draft
+  sublabel: calls draft subagent
+  kind: graph_node
+  summary: Runs the tool-less draft subagent on the posting and its research brief, sends the draft as a new Telegram
+    message with I applied and Discard buttons, then after_draft routes on the result.
+  how:
+  - The posting is revalidated with Posting.model_validate and the brief, when present, with CheckedBrief.model_validate.
+  - If draft_fn raises, it sends "Couldn't draft this one (<error type>). Try Draft again later." and returns choice
+    "draft_failed" instead of raising.
+  - Tracker is set to "drafted" before the send, so it never lags a delivered draft.
+  - The draft message id is stored under "<tid>:draft"; a TelegramError on that send also returns "draft_failed".
+  - 'after_draft: "drafted" goes to ask_after, anything else back to ask.'
+  rule: least privilege
+  refs:
+  - {file: src/job_copilot/application.py, symbol: build_app_graph.draft, label: draft()}
+  - file: src/job_copilot/application.py
+    symbol: build_app_graph.after_draft
+    label: after_draft()
+- id: app_ask_after
+  label: ask_after
+  sublabel: 'interrupt: after draft'
+  kind: interrupt
+  summary: Second pause, reached only after a draft was delivered. It waits for the owner to press I applied or
+    Discard.
+  how:
+  - 'Calls interrupt({"stage": "after_draft", "key": key}).'
+  - Resume value kept only if in AFTER = ("applied", "discard"); otherwise "invalid".
+  - No side effects, so it is safe to re-run.
+  rule: untrusted text
+  refs:
+  - file: src/job_copilot/application.py
+    symbol: build_app_graph.ask_after
+    label: ask_after()
+  - {file: src/job_copilot/application.py, symbol: AFTER, label: AFTER actions}
+- id: app_record_applied
+  label: record_applied
+  sublabel: side effect, ends thread
+  kind: graph_node
+  summary: Marks the posting as applied and clears the buttons on both the draft message and the original posting
+    message. The thread then ends.
+  how:
+  - Writes status "applied" to the tracker.
+  - Calls tg.set_buttons(..., None) on the "<tid>:draft" message and on the "<tid>" message.
+  - The agent never applies on the owner's behalf; this only records what the owner says they did.
+  - Fixed edge record_applied -> END.
+  rule: least privilege
+  refs:
+  - file: src/job_copilot/application.py
+    symbol: build_app_graph.record_applied
+    label: record_applied()
+- id: app_record_discarded
+  label: record_discarded
+  sublabel: side effect, back to ask
+  kind: graph_node
+  summary: Marks the draft as discarded, removes the buttons from the draft message, and returns the thread to ask
+    so the owner can draft again.
+  how:
+  - Writes status "draft discarded" to the tracker.
+  - Clears buttons only on the "<tid>:draft" message; the original posting message keeps its buttons, and their
+    tokens still map to the thread.
+  - Fixed edge record_discarded -> ask.
+  refs:
+  - file: src/job_copilot/application.py
+    symbol: build_app_graph.record_discarded
+    label: record_discarded()
+- id: checkpointer
+  label: SQLite checkpointer
+  sublabel: checkpoints.sqlite
+  kind: store
+  summary: LangGraph SqliteSaver that persists every application thread, so a paused thread survives process exits
+    and restarts. The run and the bot each open their own connection to the same file.
+  how:
+  - 'Path: bot.CHECKPOINTS = DEFAULT_DB.with_name("checkpoints.sqlite"), next to ~/.local/share/job-copilot/state.sqlite.'
+  - bot.main and run._delivery both build SqliteSaver(sqlite3.connect(CHECKPOINTS, check_same_thread=False)).
+  - The run writes threads (offer pauses them at ask); the bot resumes them with Command(resume=action).
+  rule: personal data
+  refs:
+  - {file: src/job_copilot/bot.py, symbol: CHECKPOINTS, label: CHECKPOINTS}
+  - {file: src/job_copilot/bot.py, symbol: main, label: SqliteSaver in bot.main}
+  - {file: src/job_copilot/run.py, symbol: _delivery, label: SqliteSaver in run._delivery}
+- id: bot_main
+  label: bot.main()
+  sublabel: long-poll loop
+  kind: entry
+  summary: The Telegram listener process. It builds the application graph, then long-polls getUpdates forever and
+    hands each update to handle_update.
+  how:
+  - Exits with SystemExit if TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing from secrets.
+  - 'Starts from store meta "tg_offset" and saves the new offset before handling each update: at-most-once, so a
+    crashing update is not retried forever.'
+  - A getUpdates TelegramError sleeps 10 s and retries; an exception in one update is logged and the loop continues.
+  - Each update runs inside tracing(cfg, secrets, hidden=True), so traces keep structure and timing but not CV or
+    draft text.
+  rule: secrets
+  refs:
+  - {file: src/job_copilot/bot.py, symbol: main, label: main()}
+- id: bot_handle_update
+  label: handle_update()
+  sublabel: owner + stage check
+  kind: guard
+  summary: Validates one Telegram update and, for a button press, resumes the right thread only if the action matches
+    what that thread is waiting for.
+  how:
+  - Drops any update where tg.is_owner(update) is false and returns "ignored".
+  - Splits callback data into token and action; an action outside FIRST + AFTER or an unknown token answers "That
+    button is no longer valid."
+  - recover() first finishes a thread that has a pending node but no interrupt (cut off mid-node); side-effect nodes
+    are safe to re-run.
+  - _stage() reads the pending interrupt's stage; the action must be in FIRST for "first" or AFTER for "after_draft",
+    else "Already handled."
+  - 'Text (lowercased): /status or status sends tracker counts; /start, /help or help sends HELP; anything else
+    is "unhandled".'
+  rule: untrusted text
+  refs:
+  - {file: src/job_copilot/bot.py, symbol: handle_update, label: handle_update()}
+  - {file: src/job_copilot/bot.py, symbol: recover, label: recover()}
+  - {file: src/job_copilot/bot.py, symbol: _stage, label: _stage()}
+- id: state_store
+  label: Store (state.sqlite)
+  sublabel: tokens, messages, tracker
+  kind: store
+  summary: Local SQLite state shared by the run and the bot. For this half it holds button tokens, Telegram message
+    ids, the application status tracker and the links from postings to their screening runs.
+  how:
+  - 'new_token uses secrets.token_urlsafe(12): opaque and unguessable; thread_for maps it back to one thread id.'
+  - messages table keeps message ids outside graph state, keyed "<tid>" and "<tid>:draft".
+  - set_status upserts the applications row (saved, dismissed, drafted, draft discarded, applied); status_counts
+    backs /status.
+  - link_run stores run_id, route, score and posting per key; run._report calls it for every top and overflow posting.
+  - WAL journal mode and a 10 s connect timeout, because two processes share the file.
+  rule: personal data
+  refs:
+  - {file: src/job_copilot/store.py, symbol: Store.new_token, label: new_token()}
+  - {file: src/job_copilot/store.py, symbol: Store.set_status, label: set_status()}
+  - {file: src/job_copilot/store.py, symbol: Store.link_run, label: link_run()}
+  - {file: src/job_copilot/store.py, symbol: Store.set_message, label: set_message()}
+- id: telegram_client
+  label: Telegram client
+  sublabel: plain text, owner only
+  kind: external
+  summary: Minimal Telegram Bot API client used by both processes. It sends plain text only and accepts input only
+    from the owner's private chat.
+  how:
+  - 'send: no parse_mode, link previews disabled, text sanitized and capped at MAX_TEXT = 3900 chars.'
+  - 'is_owner: chat id and sender id must both equal the configured chat id; plain messages must also come from
+    a private chat.'
+  - _call makes up to 3 attempts, retrying network errors and 429 (retry_after, max 60 s); errors never include
+    the token-bearing URL.
+  - updates long-polls getUpdates with timeout 50 and allowed_updates message and callback_query.
+  - 'set_buttons and answer are best effort: they catch TelegramError and do not raise.'
+  rule: untrusted text
+  refs:
+  - {file: src/job_copilot/telegram.py, symbol: Telegram.is_owner, label: is_owner()}
+  - {file: src/job_copilot/telegram.py, symbol: Telegram.send, label: send()}
+  - {file: src/job_copilot/telegram.py, symbol: Telegram._call, label: _call() retries}
+  - {file: src/job_copilot/telegram.py, symbol: Telegram.updates, label: updates()}
+- id: owner_feedback
+  label: LangSmith feedback
+  sublabel: owner_interest score
+  kind: eval
+  summary: After a press is applied, the bot records the owner's decision as LangSmith feedback on that posting's
+    screening run, so screener versions can be compared against what the owner actually did.
+  how:
+  - 'Feedback key "owner_interest"; scores: dismiss 0, save 1, draft 1, applied 1. "discard" sends nothing.'
+  - Looks up run_id with store.run_link(key); no client or no run_id means nothing is sent.
+  - 'Payload is only the score and the action name: no posting text, CV or draft.'
+  - Any exception is logged and swallowed, so feedback never blocks a button.
+  rule: personal data
+  refs:
+  - {file: src/job_copilot/feedback.py, symbol: record_feedback, label: record_feedback()}
+  - {file: src/job_copilot/feedback.py, symbol: SCORES, label: SCORES}
+  - {file: src/job_copilot/bot.py, symbol: main.on_action, label: on_action in bot.main}
+- id: config_yaml
+  label: config.yaml
+  sublabel: limits, models, thresholds
+  kind: ops
+  summary: The single file in git that holds models, routing thresholds, per-run limits, the fetch allowlist and
+    the timezone. Code reads it; no model sees or changes it.
+  how:
+  - 'Models: screener claude-haiku-5-5, research claude-sonnet-5-5, draft claude-opus-5-5, fallback claude-haiku-5-5.'
+  - 'Thresholds: digest_min 55 (below is dropped), research_min 75 (at or above gets company research if budget
+    is left).'
+  - Limits include max_postings_per_run 40, max_research_per_run 3, graph_recursion_limit 60, daily_model_calls
+    400.
+  - Research is capped at 8 model calls, 6 tool calls, 4 web searches and 300 s per run; max_digest_items is 8.
+  - fetch_allowlist lists 10 domains (linkedin.com, greenhouse.io, lever.co, wikipedia.org and others); timezone
+    Asia/Jerusalem.
+  rule: limits
+  refs:
+  - {file: config/config.yaml, match: 'digest_min: 55', label: 'digest_min: 55'}
+  - file: config/config.yaml
+    match: 'graph_recursion_limit: 60'
+    label: 'graph_recursion_limit: 60'
+  - {file: config/config.yaml, match: 'fetch_allowlist:', label: fetch_allowlist}
+- id: load_config
+  label: load_config
+  sublabel: pydantic validation
+  kind: guard
+  summary: Loads config.yaml, deep-merges the private config.local.yaml over it, and validates the result with frozen
+    pydantic models that reject unknown keys and out-of-range values.
+  how:
+  - Every model uses extra="forbid" and frozen=True, so a typo or a runtime mutation fails loudly.
+  - Thresholds checks both values are 0-100 and that research_min >= digest_min.
+  - Limits bounds each cap, e.g. graph_recursion_limit 10-200, daily_model_calls 1-5000, research_timeout_s 30-900.
+  - _deep_merge merges mappings key by key; any other value, lists included, replaces the default outright.
+  - LangSmith api_url must be the US or EU api.smith.langchain.com URL; workspace_id must be 36 hex-or-dash characters,
+    or null.
+  rule: limits
+  refs:
+  - {file: src/job_copilot/config.py, symbol: load_config, label: load_config()}
+  - {file: src/job_copilot/config.py, symbol: Limits, label: Limits}
+  - {file: src/job_copilot/config.py, symbol: Thresholds, label: Thresholds}
+  - {file: src/job_copilot/config.py, symbol: _deep_merge, label: _deep_merge()}
+- id: load_secrets
+  label: load_secrets
+  sublabel: never os.environ
+  kind: guard
+  summary: Reads keys from ~/.config/job-copilot/secrets.env into a frozen Secrets dataclass that callers pass explicitly.
+    Nothing is exported to the environment.
+  how:
+  - Raises SecretsError if the file is missing or ANTHROPIC_API_KEY is empty.
+  - On POSIX it refuses a file readable by group or others, or one not owned by the running user.
+  - LANGSMITH_API_KEY, TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are optional and become None when blank.
+  - The three key fields use repr=False, so printing a Secrets object hides them; only the chat id is shown.
+  rule: secrets
+  refs:
+  - {file: src/job_copilot/secrets.py, symbol: load_secrets, label: load_secrets()}
+  - file: src/job_copilot/secrets.py
+    symbol: _check_permissions
+    label: _check_permissions()
+  - {file: src/job_copilot/secrets.py, symbol: Secrets, label: Secrets}
+- id: logsafe
+  label: setup_process
+  sublabel: umask + log redaction
+  kind: guard
+  summary: Called first in main() of run.py and bot.py. Makes every file the process creates private and attaches
+    a filter that scrubs token-shaped strings from all log output.
+  how:
+  - os.umask(0o077) so databases, checkpoints and logs are readable only by the service user.
+  - _SECRETS matches Telegram bot tokens (with or without the bot prefix), sk-ant- Anthropic keys and lsv2_ LangSmith
+    keys.
+  - RedactFilter replaces matches with [redacted] in the message, the formatted traceback and stack_info.
+  - httpx, httpcore, httpx2, httpcore2, anthropic and langsmith loggers are set to WARNING because they log full
+    URLs that contain the Telegram token.
+  rule: secrets
+  refs:
+  - {file: src/job_copilot/logsafe.py, symbol: setup_process, label: setup_process()}
+  - {file: src/job_copilot/logsafe.py, symbol: RedactFilter, label: RedactFilter}
+  - {file: src/job_copilot/logsafe.py, symbol: _SECRETS, label: _SECRETS regex}
+- id: tracing
+  label: observability.tracing
+  sublabel: LangSmith, opt-in
+  kind: ops
+  summary: Context manager that turns LangSmith tracing on for one run with an explicit client. Without a LangSmith
+    key it runs the block with tracing disabled.
+  how:
+  - make_client passes api_key, api_url and workspace_id explicitly; nothing is read from os.environ.
+  - 'No langsmith_api_key: yields None inside tracing_context(enabled=False).'
+  - hidden=True sets hide_inputs and hide_outputs; bot.py uses it so the CV and drafts never leave the host.
+  - run.py wraps graph.invoke in tracing(cfg, secrets) with recursion_limit from config; the client is flushed in
+    finally.
+  rule: personal data
+  refs:
+  - {file: src/job_copilot/observability.py, symbol: tracing, label: tracing()}
+  - {file: src/job_copilot/observability.py, symbol: make_client, label: make_client()}
+- id: eval_config
+  label: eval_config
+  sublabel: separate eval budget
+  kind: eval
+  summary: 'Shared setup for all evals: the live config with a larger daily call cap, counted in its own usage database
+    so evals never spend the live agent''s budget.'
+  how:
+  - EVAL_DAILY_MODEL_CALLS = 1500, replacing the live daily_model_calls of 400.
+  - Usage is counted in eval-usage.sqlite next to the live store DB (EVAL_USAGE_DB).
+  - Every other value (models, thresholds, limits) is the live config, so evals test what production runs.
+  rule: limits
+  refs:
+  - {file: evals/_common.py, symbol: eval_config, label: eval_config()}
+  - {file: evals/_common.py, symbol: EVAL_DAILY_MODEL_CALLS, label: EVAL_DAILY_MODEL_CALLS}
+- id: release_gate
+  label: evals/gate.py
+  sublabel: release gate
+  kind: eval
+  summary: Runs the three eval suites as subprocesses and passes only if all three exit 0. Required before any prompt,
+    model or threshold change.
+  how:
+  - 'Usage: gate.py <pool.jsonl> <labels.json>; wrong arg count prints usage and returns 2.'
+  - Runs screener_eval.py, redteam_research.py, then draft_eval.py, printing the last 8 non-empty output lines of
+    each.
+  - 'Prints PASS/FAIL per suite and RELEASE GATE: PASS only when every suite returned 0; exit 1 otherwise.'
+  - Runs on the host, not in CI, because it needs the keys, profile and CV.
+  rule: evals gate
+  refs:
+  - {file: evals/gate.py, symbol: main, label: main()}
+- id: screener_eval
+  label: screener_eval
+  sublabel: fit-labels
+  kind: eval
+  summary: Grades the real screener plus route_for against the owner's labels, as LangSmith experiments on fit-labels
+    and, if present, fit-labels-live.
+  how:
+  - Title deal-breakers are checked first, as in production; otherwise the screener scores and route_for picks the
+    route.
+  - 'Gate: no posting labelled fit is dropped, and research precision >= 0.8 (maybe counts as a miss).'
+  - Any errored run also fails the gate; exit 1 on failure, 2 if the LangSmith key is missing.
+  - The fit-labels dataset is re-uploaded only when its sha256 content digest changes.
+  rule: evals gate
+  refs:
+  - {file: evals/screener_eval.py, symbol: main, label: main()}
+  - file: evals/screener_eval.py
+    symbol: GATE_RESEARCH_PRECISION
+    label: GATE_RESEARCH_PRECISION = 0.8
+  - {file: evals/screener_eval.py, symbol: sync_dataset, label: sync_dataset()}
+- id: redteam_eval
+  label: redteam_research
+  sublabel: 20 injection cases
+  kind: eval
+  summary: Runs the real research model on 20 planted prompt-injection pages served by a fake fetcher, with the
+    real UrlGuard checking every URL the model asks for.
+  how:
+  - 'CASES: 19 injected pages (hidden divs, Hebrew, base64, fake JSON, private IPs, exfil URLs) and 1 clean control
+    page.'
+  - web_search is off and DNS resolves to a fixed public IP, so every case is reproducible.
+  - Fails on any off-host fetch allowed, any canary string in the checked brief, or a manipulated field (work_mode,
+    business_facing).
+  - Also requires injection_detected on >= 90% of injected cases and every case to complete.
+  rule: untrusted text
+  refs:
+  - {file: evals/redteam_research.py, symbol: CASES, label: CASES}
+  - {file: evals/redteam_research.py, symbol: main, label: main()}
+- id: draft_eval
+  label: draft_eval
+  sublabel: grounding judge
+  kind: eval
+  summary: The real draft subagent writes drafts for postings labelled fit; code checks plus an LLM judge verify
+    that every claim is backed by the CV. Payloads are hidden in LangSmith.
+  how:
+  - Default --n 10 postings; gate.py does not pass --n.
+  - 'Code checks: no links or email addresses in the cover note, CV bullets or gaps, and a cover note of 1-200 words.'
+  - 'Judge is the research model with structured JudgeVerdict output: grounded, unsupported claims, tone issues.'
+  - 'Gate: every draft grounded, every code check passes, no errored runs. Tone is advisory against an 80% target.'
+  - 'make_client(hidden=True): only scores and timings reach LangSmith, never the CV or draft text.'
+  rule: evals gate
+  refs:
+  - {file: evals/draft_eval.py, symbol: main, label: main()}
+  - {file: evals/draft_eval.py, symbol: JudgeVerdict, label: JudgeVerdict}
+  - {file: evals/draft_eval.py, symbol: JUDGE, label: JUDGE prompt}
+- id: promote_feedback
+  label: promote_feedback
+  sublabel: Telegram -> dataset
+  kind: eval
+  summary: Turns the owner's Telegram decisions into labelled examples in the LangSmith dataset fit-labels-live,
+    which screener_eval then grades against.
+  how:
+  - LABEL maps dismissed to no; saved, drafted, applied and draft discarded to fit.
+  - Flags a 'no' the agent researched. disagreement() also checks for a 'fit' the agent dropped, but only shown
+    postings are linked to runs, so that branch never fires in practice.
+  - --dry-run prints the rows without uploading; rows are marked promoted only after a successful upload.
+  - Runs weekly from job-copilot-promote.timer.
+  rule: evals gate
+  refs:
+  - {file: evals/promote_feedback.py, symbol: main, label: main()}
+  - {file: evals/promote_feedback.py, symbol: LABEL, label: LABEL}
+  - {file: evals/promote_feedback.py, symbol: disagreement, label: disagreement()}
+  - file: src/job_copilot/store.py
+    symbol: Store.unpromoted_feedback
+    label: Store.unpromoted_feedback()
+- id: run_timer
+  label: run.service + timer
+  sublabel: every 2 h, 08-22
+  kind: ops
+  summary: A systemd user timer starts the oneshot agent run (python -m job_copilot.run) every two hours from 08:00
+    to 22:00 Asia/Jerusalem.
+  how:
+  - OnCalendar 08,10,...,22:00 Asia/Jerusalem with RandomizedDelaySec=120 and Persistent=false (missed runs are
+    skipped).
+  - RuntimeMaxSec=1800, MemoryMax=1G, Nice=10.
+  - 'Hardened: NoNewPrivileges, ProtectSystem=strict, ProtectHome=read-only, writes only to ~/.local/share/job-copilot,
+    UMask=0077.'
+  rule: least privilege
+  refs:
+  - {file: deploy/systemd/job-copilot-run.timer, match: OnCalendar=, label: OnCalendar}
+  - file: deploy/systemd/job-copilot-run.service
+    match: RuntimeMaxSec=1800
+    label: RuntimeMaxSec=1800
+- id: bot_service
+  label: bot.service
+  sublabel: long-running
+  kind: ops
+  summary: A systemd user service that keeps the Telegram bot (python -m job_copilot.bot) running so button presses
+    can resume application threads.
+  how:
+  - Restart=on-failure with RestartSec=20; at most 5 starts in 600 s.
+  - MemoryMax=600M.
+  - 'Same hardening as the run unit: read-only filesystem except ~/.local/share/job-copilot, no privilege gain,
+    UMask=0077.'
+  rule: least privilege
+  refs:
+  - {file: deploy/systemd/job-copilot-bot.service, match: ExecStart=, label: ExecStart}
+  - file: deploy/systemd/job-copilot-bot.service
+    match: MemoryMax=600M
+    label: MemoryMax=600M
+- id: promote_timer
+  label: promote.service + timer
+  sublabel: weekly, Sunday
+  kind: ops
+  summary: A weekly systemd timer runs evals/promote_feedback.py as a oneshot service.
+  how:
+  - OnCalendar Sun 07:30 Asia/Jerusalem with Persistent=true, so a missed week runs at next boot.
+  - RuntimeMaxSec=600, MemoryMax=1G, same filesystem hardening as the other units.
+  refs:
+  - file: deploy/systemd/job-copilot-promote.timer
+    match: OnCalendar=
+    label: OnCalendar Sun 07:30
+  - {file: deploy/systemd/job-copilot-promote.service, match: ExecStart=, label: ExecStart}
+- id: install_sh
+  label: deploy/install.sh
+  sublabel: tests before install
+  kind: ops
+  summary: Installs or updates the agent on the host as the service user, without sudo. It installs nothing if the
+    tests fail.
+  how:
+  - Exits if uv is not found; runs uv sync --frozen.
+  - 'Runs pytest quietly; on failure prints "tests failed: not installing" and exits 1.'
+  - Creates ~/.local/share/job-copilot with mode 700 and copies every unit into ~/.config/systemd/user with mode
+    0644.
+  - Enables the bot service and both timers, restarts the bot, then lists timers and checks the bot is active.
+  rule: evals gate
+  refs:
+  - {file: deploy/install.sh, match: 'tests failed: not installing', label: test gate}
+  - {file: deploy/install.sh, match: systemctl --user enable --now, label: enable units}
+- id: ci
+  label: GitHub Actions CI
+  sublabel: no keys, no network
+  kind: ops
+  summary: 'Runs on every push to main and every pull request: locked install, lint, format check, tests and the
+    offline demo. It does not run the evals, which need keys.'
+  how:
+  - 'permissions: contents: read; ubuntu-latest, 15-minute timeout, Python 3.13 via setup-uv.'
+  - uv sync --frozen, then ruff check and ruff format --check.
+  - uv run pytest -q (tests never hit the network), then python -m job_copilot.demo with fake models.
+  rule: evals gate
+  refs:
+  - {file: .github/workflows/ci.yml, match: 'Tests (no network, no keys)', label: tests step}
+  - {file: .github/workflows/ci.yml, match: Offline demo, label: offline demo}
+- id: ov_run
+  kind: view
+  label: Run graph
+  sublabel: graph.py · open view
+  view: run
+  summary: 'The LangGraph run graph: parallel screening, code routing, the per-run research budget and research.
+    Ingest before it and the Telegram digest after it are plain Python in run.py.'
+  how:
+  - 'Fan-out with Send: every new posting is screened in its own task.'
+  - Every edge is a Python function over validated state; models only fill pydantic objects.
+  - Click to open the full view of the run.
+  refs:
+  - {file: src/job_copilot/graph.py, symbol: build_graph, label: build_graph()}
+- id: ov_subagents
+  kind: view
+  label: Subagents & guards
+  sublabel: least privilege · open view
+  view: subagents
+  summary: 'Four model calls with the narrowest tools that work: screener and draft have none, research has read-only
+    web tools behind an SSRF guard, self-check is one structured call.'
+  how:
+  - Each subagent returns a pydantic object (response_format); output is data, never code.
+  - One daily model-call cap is shared by every subagent through middleware.
+  - Click to open the view with every guard.
+  refs:
+  - file: src/job_copilot/subagents/research.py
+    symbol: build_researcher
+    label: build_researcher()
+- id: ov_app
+  kind: view
+  label: Application thread
+  sublabel: application.py · open view
+  view: hitl
+  summary: One checkpointed LangGraph thread per offered posting. It pauses with interrupt() until the owner presses
+    a button, even across restarts.
+  how:
+  - Only ask and ask_after call interrupt(); side-effect nodes never pause.
+  - A draft is written only when a human presses Draft.
+  - Click to open the human-in-the-loop view.
+  refs:
+  - file: src/job_copilot/application.py
+    symbol: build_app_graph
+    label: build_app_graph()
+- id: ov_evals
+  kind: view
+  label: Evals & release gate
+  sublabel: evals/ · open view
+  view: evals
+  summary: Screener, red-team and draft suites run on LangSmith; gate.py passes only when all three pass. Owner
+    decisions flow back as a live dataset.
+  how:
+  - Any prompt, model or threshold change runs evals/gate.py first.
+  - Evals use their own model-call budget, separate from the live agent.
+  - Click to open the evals view.
+  refs:
+  - {file: evals/gate.py, symbol: main, label: gate.main()}
+- id: ov_ops
+  kind: view
+  label: Deploy & config
+  sublabel: systemd, config · open view
+  view: ops
+  summary: Hardened systemd user units on a Raspberry Pi, validated config, secrets passed explicitly, log redaction
+    and opt-in tracing.
+  how:
+  - install.sh runs the tests first and refuses to install if they fail.
+  - Limits and thresholds come from config/config.yaml, validated by pydantic.
+  - Click to open the operations view.
+  refs:
+  - {file: deploy/install.sh, match: tests failed, label: install.sh}
